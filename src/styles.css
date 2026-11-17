@@ -166,3 +166,14 @@
 .article-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px;padding:10px 12px;background:#fff;border:1px solid #ececf2;border-radius:10px}
 .article-nav .outline-button:disabled{opacity:.45;cursor:not-allowed}
 .article-nav-count{font-size:12px;font-weight:600;color:#7b7a8d}
+
+/* SEO panel sub-tabs: keep all five on one line inside the 280px side panel */
+.seo-subtabs{gap:2px;overflow-x:auto;scrollbar-width:none}
+.seo-subtabs::-webkit-scrollbar{display:none}
+.seo-subtab{flex:1 1 auto;min-width:0;padding:6px 4px;white-space:nowrap}
+
+/* Writer action buttons: 2x2 grid on phones so nothing is cut off */
+@media(max-width:760px){
+  .writer-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+  .writer-actions>button{justify-content:center;white-space:nowrap;width:100%}
+}

@@ -963,7 +963,7 @@ status: "${article.status || 'Draft'}"
                         Repurpose
                       </button>
                       <button className={'seo-subtab ' + (seoSubtab === 'faq' ? 'active' : '')} onClick={() => setSeoSubtab('faq')}>
-                        FAQ Schema
+                        FAQ
                       </button>
                       <button className={'seo-subtab ' + (seoSubtab === 'evidence' ? 'active' : '')} onClick={() => setSeoSubtab('evidence')}>
                         Sources ({article.sources?.length || 0})
