@@ -1,0 +1,27 @@
+CREATE DATABASE IF NOT EXISTS signalwrite CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE signalwrite;
+CREATE TABLE IF NOT EXISTS projects (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(160) NOT NULL,
+  website VARCHAR(500),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS articles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  project_id INT NULL,
+  title VARCHAR(500) NOT NULL,
+  topic VARCHAR(500),
+  keyword VARCHAR(255),
+  related_keywords_json LONGTEXT NULL,
+  keyword_strategy_json LONGTEXT NULL,
+  meta_data_json LONGTEXT NULL,
+  status VARCHAR(40) DEFAULT 'Draft',
+  content LONGTEXT,
+  sources_json LONGTEXT NULL,
+  evidence_review_json LONGTEXT NULL,
+  seo_score INT DEFAULT 0,
+  word_count INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+);

@@ -1,0 +1,9 @@
+{
+  "name": "signalwrite-ai-blog-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"", "dev:client": "vite --host 0.0.0.0", "dev:server": "node --watch server/index.js", "build": "vite build", "start": "node server/index.js" },
+  "dependencies": { "@langchain/core": "^0.3.58", "@langchain/langgraph": "^0.2.74", "@langchain/openai": "^0.6.3", "cors": "^2.8.5", "dotenv": "^16.4.7", "express": "^4.21.2", "mysql2": "^3.14.1", "react": "^19.0.0", "react-dom": "^19.0.0" },
+  "devDependencies": { "@vitejs/plugin-react": "^4.4.1", "concurrently": "^9.1.2", "vite": "^6.2.6" }
+}
