@@ -1,8 +1,61 @@
 import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
 import { createChatModel, isAiEnabled, getAiMode } from './ai.js';
+import { keywordAudit } from '../shared/seoAudit.js';
 
-const BlogState = Annotation.Root({ topic: Annotation(), keyword: Annotation(), relatedKeywords: Annotation(), context: Annotation(), sources: Annotation(), internalLinks: Annotation(), outline: Annotation(), content: Annotation(), evidenceReview: Annotation() });
+const BlogState = Annotation.Root({ topic: Annotation(), keyword: Annotation(), relatedKeywords: Annotation(), context: Annotation(), sources: Annotation(), internalLinks: Annotation(), outline: Annotation(), content: Annotation(), evidenceReview: Annotation(), seo: Annotation() });
 const llm = (temperature = 0.4) => createChatModel({ temperature });
+const textOf = (response) => (typeof response.content === 'string' ? response.content : response.content.map((x) => x.text || '').join(''));
+
+// The same placement rules the in-app SEO score checks (see shared/seoAudit.js), so drafts score 80+ from the start.
+function seoChecklist(keyword, related = []) {
+  return `SEO KEYWORD REQUIREMENTS (the article is scored on these; follow every one while keeping the writing natural):
+1. Use the exact primary phrase "${keyword}" word-for-word in the H1 title (the first line, starting with "# ").
+2. Use "${keyword}" word-for-word within the first 100 words of the article body.
+3. Use "${keyword}" word-for-word in at least one "## " subheading.
+4. Use "${keyword}" 3 to 6 times in total. Never stuff it or force it into every paragraph.
+${related.length ? `5. Use each of these related phrases word-for-word at least once, where it fits: ${related.map((k) => `"${k}"`).join(', ')}.` : '5. Use natural variations of the primary phrase.'}
+6. Write at least 700 words.
+Readability still comes first: make each keyword use read like normal, helpful writing.`;
+}
+
+const SEO_TARGET = 80;
+
+// After drafting, score the article with the same audit as the UI. If it misses the target,
+// ask for a minimal revision that fixes only the missing items, and keep it only if it scores higher.
+async function optimizeSeo(content, { topic, keyword, relatedKeywords = [] }) {
+  const [body, ...rest] = String(content).split(/^(?=## Sources\b)/m);
+  const tail = rest.join('');
+  const before = keywordAudit(body, topic, keyword, relatedKeywords);
+  if (before.score >= SEO_TARGET) return { content, seo: { before: before.score, after: before.score, revised: false } };
+
+  const fixes = [];
+  if (!before.title) fixes.push(`Rewrite the H1 title (the "# " line) so it contains "${keyword}" word-for-word.`);
+  if (!before.intro) fixes.push(`Mention "${keyword}" word-for-word within the first 100 words.`);
+  if (!before.heading) fixes.push(`Rename one existing "## " subheading so it naturally contains "${keyword}" word-for-word.`);
+  if (before.count < 2) fixes.push(`Use "${keyword}" word-for-word 3 to 4 times in total (currently ${before.count}).`);
+  if (before.count > 8) fixes.push(`Reduce "${keyword}" to about 5 uses (currently ${before.count}); use natural variations instead.`);
+  if (before.relatedMissing.length) fixes.push(`Add each of these phrases word-for-word once, inside an existing or one new sentence where it fits: ${before.relatedMissing.map((k) => `"${k}"`).join(', ')}.`);
+  if (before.wordCount < 350) fixes.push('Expand the thinnest section with practical, specific advice so the article passes 700 words.');
+  if (!fixes.length) return { content, seo: { before: before.score, after: before.score, revised: false } };
+
+  try {
+    const revised = textOf(await llm(0.2).invoke(`You are editing a finished Markdown article for SEO. Make ONLY these changes and keep everything else (facts, citations like [S1], links, FAQ, call-to-action, structure, tone) exactly as it is:
+${fixes.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+Do not add new facts, statistics, or citations. Return the complete revised article in Markdown and nothing else.
+
+ARTICLE:
+${body}`)).replace(/^```(?:markdown|md)?\s*|\s*```$/g, '').trim();
+    const after = keywordAudit(revised, topic, keyword, relatedKeywords);
+    const keptLength = after.wordCount >= before.wordCount * 0.85;
+    if (after.score > before.score && keptLength && /^#\s+/m.test(revised)) {
+      return { content: `${revised}\n\n${tail}`.trimEnd(), seo: { before: before.score, after: after.score, revised: true } };
+    }
+    return { content, seo: { before: before.score, after: before.score, revised: false } };
+  } catch (error) {
+    console.warn('[seo] Optimization pass skipped:', error.message);
+    return { content, seo: { before: before.score, after: before.score, revised: false } };
+  }
+}
 
 function parseJson(raw) {
   const clean = String(raw).replace(/```json|```/gi, '').trim();
@@ -104,7 +157,7 @@ Solving this challenge doesn't have to be overwhelming or resource-heavy. Partne
 > **[Schedule a Free Consultation or Request a Quote with ${domainName}](${siteUrl})** to speak with our experts today.`;
     } else {
       const relatedKeywords = (s.relatedKeywords || []).slice(0, 4);
-      const keywordGuidance = `SEO keyword plan: one primary phrase (${s.keyword}) and these related phrases (${relatedKeywords.join(', ') || 'none confidently inferred'}). Use the primary phrase naturally in the title, opening, and one heading only where it reads well. Weave in related phrases only where helpful. Do not target a keyword density or repeat phrases to hit a count; readability and answering the reader come first.`;
+      const keywordGuidance = seoChecklist(s.keyword, relatedKeywords);
       
       const internalLinksDirective = clientPages.length > 0 ? `
 SMART INTERNAL LINKING DIRECTIVE (CRITICAL FOR GOOGLE SEO):
@@ -160,7 +213,9 @@ Rules: never invent statistics, customers, credentials, or results. Cite support
       draft = typeof response.content === 'string' ? response.content : response.content.map((x) => x.text || '').join('');
       if (getAiMode() === 'ollama') { draft = removeRepeatedSentences(draft); assertReadableLocalDraft(draft); }
     }
-    return { content: appendSourceList(draft, s.sources) };
+    const content = appendSourceList(draft, s.sources);
+    if (!isAiEnabled() || getAiMode() === 'ollama') return { content };
+    return optimizeSeo(content, { topic: s.topic, keyword: s.keyword, relatedKeywords: (s.relatedKeywords || []).slice(0, 4) });
   })
   .addNode('review_evidence', async (s) => {
     const sources = safeSources(s.sources);

@@ -70,6 +70,7 @@ app.post('/api/articles', async (req, res) => {
       content,
       sources: result.sources || [],
       evidenceReview: result.evidenceReview || null,
+      seoOptimization: result.seo || null,
       researchWarning: research.warning,
       word_count: content.split(/\s+/).filter(Boolean).length,
       status: 'Draft'
