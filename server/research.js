@@ -1,5 +1,9 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import tls from 'node:tls';
+import https from 'node:https';
+import { X509Certificate } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { createChatModel, isAiEnabled, getAiMode } from './ai.js';
 
 const MAX_PAGE_BYTES = 900_000;
@@ -26,11 +30,74 @@ async function validatePublicUrl(raw) {
   return url;
 }
 
-async function fetchPublicText(raw, { timeout = 12_000, maxBytes = MAX_PAGE_BYTES } = {}) {
+// Some sites (e.g. qbotica.com) serve only their own certificate and omit the intermediate one.
+// Browsers silently download the missing intermediate from the certificate's "CA Issuers" (AIA) URL;
+// Node does not, and fails with "unable to verify the first certificate". We do the same as browsers:
+// fetch that intermediate, then retry with full certificate verification still on.
+const INCOMPLETE_CHAIN_CODES = new Set(['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY']);
+const intermediateCache = new Map();
+
+async function missingIntermediate(url) {
+  const key = `${url.hostname}:${url.port || 443}`;
+  if (intermediateCache.has(key)) return intermediateCache.get(key);
+  const issuerUrl = await new Promise((resolve, reject) => {
+    // Verification is off only to read the site's certificate; nothing is sent and no content is used.
+    const socket = tls.connect({ host: url.hostname, port: Number(url.port || 443), servername: url.hostname, rejectUnauthorized: false, timeout: 8000 }, () => {
+      const uri = socket.getPeerCertificate()?.infoAccess?.['CA Issuers - URI']?.[0];
+      socket.end();
+      uri ? resolve(uri) : reject(new Error('certificate has no issuer URL'));
+    });
+    socket.on('timeout', () => { socket.destroy(); reject(new Error('timed out reading certificate')); });
+    socket.on('error', reject);
+  });
+  const issuer = await validatePublicUrl(issuerUrl);
+  const res = await fetch(issuer, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) throw new Error(`issuer certificate download failed (HTTP ${res.status})`);
+  const pem = new X509Certificate(Buffer.from(await res.arrayBuffer())).toString();
+  intermediateCache.set(key, pem);
+  return pem;
+}
+
+function httpsGetWithCa(url, { ca, timeout, headers }) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(url, { method: 'GET', headers, ca: [...tls.rootCertificates, ca], timeout }, (res) => {
+      const responseHeaders = new Headers();
+      for (const [name, value] of Object.entries(res.headers)) for (const v of [].concat(value ?? [])) responseHeaders.append(name, String(v));
+      const status = res.statusCode || 502;
+      const noBody = [204, 205, 304].includes(status);
+      if (noBody) res.resume();
+      resolve(new Response(noBody ? null : Readable.toWeb(res), { status, headers: responseHeaders }));
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function fetchPage(url, { timeout, headers }) {
+  try {
+    return await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeout), headers });
+  } catch (error) {
+    const code = error?.cause?.code;
+    if (url.protocol === 'https:' && INCOMPLETE_CHAIN_CODES.has(code)) {
+      try {
+        return await httpsGetWithCa(url, { ca: await missingIntermediate(url), timeout, headers });
+      } catch (retryError) {
+        throw new Error(`Could not securely connect to ${url.hostname}: its SSL certificate chain is incomplete (${retryError.message}).`);
+      }
+    }
+    if (error?.name === 'TimeoutError') throw new Error(`${url.hostname} took too long to respond.`);
+    // Node's bare "fetch failed" hides the real reason; surface it.
+    const reason = error?.cause?.code || error?.cause?.message || error?.message;
+    throw new Error(`Could not connect to ${url.hostname}${reason ? ` (${reason})` : ''}.`);
+  }
+}
+
+async function fetchPublicText(raw,{ timeout = 12_000, maxBytes = MAX_PAGE_BYTES } = {}) {
   let current = raw;
   for (let hop = 0; hop <= 3; hop += 1) {
     const url = await validatePublicUrl(current);
-    const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeout), headers: { 'User-Agent': 'SignalWriteResearch/1.0 (+https://signalwrite.local)', Accept: 'text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.1' } });
+    const response = await fetchPage(url, { timeout, headers: { 'User-Agent': 'SignalWriteResearch/1.0 (+https://signalwrite.local)', Accept: 'text/html,application/xhtml+xml,application/xml,text/plain;q=0.9,*/*;q=0.1' } });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get('location');
       if (!location || hop === 3) throw new Error('The website redirected too many times.');
