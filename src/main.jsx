@@ -433,7 +433,7 @@ status: "${article.status || 'Draft'}"
               <section className="welcome">
                 <div>
                   <div className="eyebrow"><span className="live-pip"/> CLIENT CONTENT STUDIO</div>
-                  <h1>Good morning, Nabeela <span className="wave">✳</span></h1>
+                  <h1>{(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()} <span className="wave">✳</span></h1>
                   <p>Turn website data into high-value articles with transparent keyword business rationale.</p>
                 </div>
                 <button className="primary" onClick={() => setTab('Website analysis')}>
