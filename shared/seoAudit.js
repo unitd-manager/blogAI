@@ -47,7 +47,8 @@ export function keywordAudit(content = '', title = '', primary = '', related = [
     else if (count > 8) score += 10;
     if (relatedTerms.length > 0) {
       score += Math.round((relatedUsed.length / relatedTerms.length) * 12);
-    } else {
+    } else if (count > 0) {
+      // No related terms to check: give the points only when the article actually uses the keyword.
       score += 10;
     }
   }

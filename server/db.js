@@ -13,6 +13,7 @@ export async function initializeDatabase() {
   await conn.end();
   await pool.query(`CREATE TABLE IF NOT EXISTS projects (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) NOT NULL, website VARCHAR(500), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
   await pool.query(`CREATE TABLE IF NOT EXISTS articles (id INT AUTO_INCREMENT PRIMARY KEY, project_id INT NULL, title VARCHAR(500) NOT NULL, topic VARCHAR(500), keyword VARCHAR(255), related_keywords_json LONGTEXT NULL, status VARCHAR(40) DEFAULT 'Draft', content LONGTEXT, sources_json LONGTEXT NULL, evidence_review_json LONGTEXT NULL, seo_score INT DEFAULT 0, word_count INT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL)`);
+  await pool.query('CREATE TABLE IF NOT EXISTS settings (name VARCHAR(64) PRIMARY KEY, value TEXT)');
   const [columns] = await pool.query('SHOW COLUMNS FROM articles');
   const names = new Set(columns.map((column) => column.Field));
   if (!names.has('sources_json')) await pool.query('ALTER TABLE articles ADD COLUMN sources_json LONGTEXT NULL');
@@ -24,7 +25,7 @@ export async function initializeDatabase() {
   // Older databases were created as latin1, which rejects curly quotes, special dashes and emoji
   // that AI models write — the article then silently fails to save. Convert to utf8mb4 (lossless).
   await pool.query('ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
-  const [tables] = await pool.query("SELECT TABLE_NAME AS name, TABLE_COLLATION AS collation FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('projects', 'articles')");
+  const [tables] = await pool.query("SELECT TABLE_NAME AS name, TABLE_COLLATION AS collation FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('projects', 'articles', 'settings')");
   for (const table of tables) {
     if (!String(table.collation).startsWith('utf8mb4')) await pool.query(`ALTER TABLE \`${table.name}\` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
   }

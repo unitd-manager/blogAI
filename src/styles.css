@@ -177,3 +177,15 @@
   .writer-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
   .writer-actions>button{justify-content:center;white-space:nowrap;width:100%}
 }
+
+/* Article list: row + delete button side by side */
+.article-row-wrap{display:flex;align-items:center;border-bottom:1px solid #f0eff4;background:white}
+.article-row-wrap:hover{background:#fbfaff}
+.article-row-wrap .article-row{flex:1;min-width:0;border-bottom:0;background:transparent}
+.row-delete{flex:none;display:grid;place-items:center;width:30px;height:30px;margin-right:12px;border:1px solid #f1e3e3;border-radius:7px;background:#fff;color:#b86a6a}
+.row-delete:hover{background:#fdf1f1;color:#9a3434;border-color:#eccaca}
+/* Writer: website this article was written for */
+.writer-site{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:10px;color:#8b8999}
+.writer-site span{font-weight:600}
+.writer-site input{width:min(280px,60vw);border:1px solid #e7e6ee;border-radius:6px;padding:6px 9px;font-size:10px;color:#44435b;outline:0;background:#fff}
+.writer-site input:focus{border-color:#8b7be0}

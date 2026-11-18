@@ -131,9 +131,12 @@ function App() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ active: false, current: 0, total: 0, currentTopic: '', completed: [] });
   const [topicViewMode, setTopicViewMode] = useState('list'); // 'list' | 'calendar'
+  const [settings, setSettings] = useState({ brandVoice: '', audience: '' });
+  const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
     fetch('/api/articles').then((r) => (r.ok ? r.json() : [])).then((x) => Array.isArray(x) && setArticles(x)).catch(() => {});
+    fetch('/api/settings').then((r) => (r.ok ? r.json() : null)).then((x) => x && setSettings({ brandVoice: x.brandVoice || '', audience: x.audience || '' })).catch(() => {});
     fetch('/api/health').then((r) => r.json()).then((x) => setSetup(!(x.aiReady ?? x.aiConfigured))).catch(() => setSetup(true));
   }, []);
 
@@ -264,7 +267,8 @@ function App() {
         body: JSON.stringify({
           title: article.title,
           content: article.content,
-          metaData: article.metaData
+          metaData: article.metaData,
+          website: article.website || undefined
         })
       });
       if (!r.ok) {
@@ -274,6 +278,42 @@ function App() {
       notify('Draft & SEO Meta settings saved');
     } catch (e) {
       notify(`Not saved: ${e.message || 'server unavailable'}. Your edits are still here, try again.`);
+    }
+  }
+
+  async function saveSettings() {
+    setSavingSettings(true);
+    try {
+      const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
+      let data = {}; try { data = await r.json(); } catch {}
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      setSettings({ brandVoice: data.brandVoice || '', audience: data.audience || '' });
+      notify('Settings saved. New articles will use this voice and audience.');
+    } catch (e) {
+      notify(`Settings not saved: ${e.message || 'server unavailable'}`);
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  async function deleteArticle(a) {
+    if (!window.confirm(`Delete "${a.title}"?
+
+This permanently removes the article and cannot be undone.`)) return;
+    const removeLocally = () => {
+      setArticles((prev) => prev.filter((x) => x !== a && (a.id == null || x.id !== a.id)));
+      if (article === a || (a.id != null && article?.id === a.id)) setArticle(null);
+    };
+    if (a.id == null) { removeLocally(); notify('Article removed'); return; }
+    try {
+      const r = await fetch(`/api/articles/${a.id}`, { method: 'DELETE' });
+      let data = {}; try { data = await r.json(); } catch {}
+      if (r.status === 404) { removeLocally(); notify('This article was already deleted'); return; }
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      removeLocally();
+      notify('Article deleted');
+    } catch (e) {
+      notify(`Not deleted: ${e.message || 'server unavailable'}`);
     }
   }
 
@@ -900,6 +940,19 @@ status: "${article.status || 'Draft'}"
                   <div className="eyebrow">STEP 03 · CLIENT CONTENT STUDIO</div>
                   <h1>{article ? article.title : 'Let’s make something worth reading.'}</h1>
                   <p>{article ? 'Draft complete with natural keyword placement and verifiable evidence.' : 'Choose one of your topic ideas to open the writing studio.'}</p>
+                  {article && (
+                    <label className="writer-site">
+                      <Icon name="globe" size={13}/>
+                      <span>Website</span>
+                      <input
+                        value={article.website || ''}
+                        onChange={(e) => setArticle({ ...article, website: e.target.value })}
+                        placeholder="client-site.com (used in the report)"
+                        maxLength={500}
+                        aria-label="Website this article is for"
+                      />
+                    </label>
+                  )}
                 </div>
                 {article && (
                   <div className="writer-actions">
@@ -1320,7 +1373,8 @@ status: "${article.status || 'Draft'}"
               <div className="article-list-panel panel">
                 {articles.length ? (
                   articles.map((a, i) => (
-                    <button className="article-row" key={a.id || i} onClick={() => { setArticle(a); setTab('Blog writer'); }}>
+                    <div className="article-row-wrap" key={a.id || i}>
+                    <button className="article-row" onClick={() => { setArticle(a); setTab('Blog writer'); }}>
                       <span className="row-icon"><Icon name="file" size={17}/></span>
                       <span className="row-title">
                         <b>{a.title}</b>
@@ -1330,6 +1384,10 @@ status: "${article.status || 'Draft'}"
                       <span className="row-words">{a.word_count || 0} words</span>
                       <Icon name="chev" size={15}/>
                     </button>
+                    <button className="row-delete" onClick={() => deleteArticle(a)} title="Delete article" aria-label={`Delete ${a.title}`}>
+                      <Icon name="x" size={14}/>
+                    </button>
+                    </div>
                   ))
                 ) : (
                   <div className="empty-recent large">
@@ -1356,10 +1414,15 @@ status: "${article.status || 'Draft'}"
                   <label>Agency Workspace</label>
                   <input value="SignalWrite Agency Suite" readOnly/>
                   <label>Default Brand Voice</label>
-                  <textarea placeholder="e.g. Authoritative, conversion-focused, direct, actionable, backed by real data." rows="3"/>
+                  <textarea placeholder="e.g. Authoritative, conversion-focused, direct, actionable, backed by real data." rows="3"
+                    value={settings.brandVoice} maxLength={500}
+                    onChange={(e) => setSettings({ ...settings, brandVoice: e.target.value })}/>
                   <label>Target Audience (ICP)</label>
-                  <input placeholder="e.g. Founders, Marketing Leaders, B2B Decision Makers"/>
-                  <button className="primary" onClick={() => notify('Agency settings saved')}>Save preferences</button>
+                  <input placeholder="e.g. Founders, Marketing Leaders, B2B Decision Makers"
+                    value={settings.audience} maxLength={300}
+                    onChange={(e) => setSettings({ ...settings, audience: e.target.value })}/>
+                  <small className="field-help" style={{ margin: '-10px 0 14px' }}>Used in every new article this team writes.</small>
+                  <button className="primary" onClick={saveSettings} disabled={savingSettings}>{savingSettings ? 'Saving…' : 'Save preferences'}</button>
                 </div>
 
                 <div className="panel">
