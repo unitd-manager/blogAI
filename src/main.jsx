@@ -107,6 +107,52 @@ function generateFaqJsonLd(art) {
   return { qaList, scriptTag: `<script type="application/ld+json">\n${JSON.stringify(jsonLd, null, 2).replace(/</g, '\\u003c')}\n</script>` };
 }
 
+function LoginScreen({ onLoggedIn }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (busy) return;
+    if (!password) { setError('Enter the team password.'); return; }
+    setBusy(true); setError('');
+    try {
+      const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+      let data = {}; try { data = await r.json(); } catch {}
+      if (!r.ok) throw new Error(data.error || `Login failed (HTTP ${r.status}).`);
+      onLoggedIn();
+    } catch (err) {
+      setError(err.message || 'Could not reach the server. Try again.');
+      setPassword('');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="login-page">
+      <form className="login-card" onSubmit={submit}>
+        <div className="brand">
+          <span className="brand-mark"><Icon name="spark" size={19}/></span>
+          <span>signal<span className="brand-light">write</span></span>
+        </div>
+        <h1>Welcome back</h1>
+        <p>Enter your team password to open the workspace.</p>
+        <label htmlFor="team-password">Team password</label>
+        <input
+          id="team-password" type="password" autoComplete="current-password" autoFocus
+          value={password} onChange={(e) => setPassword(e.target.value)} maxLength={200}
+          aria-invalid={Boolean(error)} aria-describedby={error ? 'login-error' : undefined}
+        />
+        {error && <div className="login-error" id="login-error" role="alert">{error}</div>}
+        <button className="primary wide" type="submit" disabled={busy}>{busy ? 'Checking…' : 'Log in'}</button>
+        <small>Ask your admin for the password. You stay logged in on this browser for 30 days.</small>
+      </form>
+    </div>
+  );
+}
+
 function App() {
   const [tab, setTab] = useState('Overview');
   const [url, setUrl] = useState('');
@@ -132,13 +178,37 @@ function App() {
   const [batchProgress, setBatchProgress] = useState({ active: false, current: 0, total: 0, currentTopic: '', completed: [] });
   const [topicViewMode, setTopicViewMode] = useState('list'); // 'list' | 'calendar'
   const [settings, setSettings] = useState({ brandVoice: '', audience: '' });
+  // Team login: checked once on load; any API answer of 401 sends the user back to the login screen.
+  const [auth, setAuth] = useState({ checked: false, required: false, loggedIn: false });
   const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await originalFetch(...args);
+      const target = String(args[0]?.url || args[0] || '');
+      if (res.status === 401 && target.startsWith('/api/') && target !== '/api/login') setAuth((a) => ({ ...a, loggedIn: false }));
+      return res;
+    };
+    originalFetch('/api/session').then((r) => r.json())
+      .then((x) => setAuth({ checked: true, required: Boolean(x.loginRequired), loggedIn: Boolean(x.loggedIn) }))
+      .catch(() => setAuth({ checked: true, required: false, loggedIn: true }));
+    return () => { window.fetch = originalFetch; };
+  }, []);
+
+  async function logout() {
+    if (!window.confirm('Log out of SignalWrite on this browser?')) return;
+    try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+    setArticle(null); setArticles([]); setTopics([]); setAnalyzed(false);
+    setAuth((a) => ({ ...a, loggedIn: false }));
+  }
+
+  useEffect(() => {
+    if (!auth.checked || !auth.loggedIn) return;
     fetch('/api/articles').then((r) => (r.ok ? r.json() : [])).then((x) => Array.isArray(x) && setArticles(x)).catch(() => {});
     fetch('/api/settings').then((r) => (r.ok ? r.json() : null)).then((x) => x && setSettings({ brandVoice: x.brandVoice || '', audience: x.audience || '' })).catch(() => {});
     fetch('/api/health').then((r) => r.json()).then((x) => setSetup(!(x.aiReady ?? x.aiConfigured))).catch(() => setSetup(true));
-  }, []);
+  }, [auth.checked, auth.loggedIn]);
 
   const notify = (m) => { setToast(m); setTimeout(() => setToast(''), 2800); };
   const seo = article ? keywordAudit(article.content, article.title, article.keyword, article.relatedKeywords || []) : null;
@@ -379,6 +449,9 @@ status: "${article.status || 'Draft'}"
     ['PREFERENCES', [['Settings', 'settings']]]
   ];
 
+  if (!auth.checked) return <div className="login-page" aria-busy="true"/>;
+  if (auth.required && !auth.loggedIn) return <LoginScreen onLoggedIn={() => setAuth((a) => ({ ...a, loggedIn: true }))}/>;
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -416,7 +489,9 @@ status: "${article.status || 'Draft'}"
           <div className="user-row">
             <div className="user-avatar">M</div>
             <div className="user-info"><b>My Account</b><span>SignalWrite workspace</span></div>
-            <span className="dots">···</span>
+            {auth.required
+              ? <button className="logout-button" onClick={logout} title="Log out">Log out</button>
+              : <span className="dots">···</span>}
           </div>
         </div>
       </aside>
@@ -431,7 +506,7 @@ status: "${article.status || 'Draft'}"
           <div className="top-right">
             <span className="status-dot"/> All changes saved
             <button className="icon-button"><Icon name="clock" size={16}/></button>
-            <button className="avatar-small" title="My Account">M</button>
+            <button className="avatar-small" title={auth.required ? 'My Account · click to log out' : 'My Account'} onClick={auth.required ? logout : undefined}>M</button>
           </div>
         </header>
 

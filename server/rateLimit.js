@@ -23,9 +23,12 @@ const daily = { count: 0, resetAt: Date.now() + DAY };
 /**
  * @param {object} options
  * @param {string} options.name   label used in log lines
- * @param {number} options.perHour max requests per IP per hour
+ * @param {number} options.perHour max requests per IP per window (default window: 1 hour)
+ * @param {number} [options.windowMs] window length
+ * @param {boolean} [options.countsTowardDaily] false for non-AI routes such as login
+ * @param {string} [options.message] custom 429 message
  */
-export function rateLimit({ name, perHour }) {
+export function rateLimit({ name, perHour, windowMs = HOUR, countsTowardDaily = true, message }) {
   const hits = new Map(); // ip -> { count, resetAt }
 
   // Drop expired entries now and then so the map doesn't grow forever.
@@ -41,7 +44,7 @@ export function rateLimit({ name, perHour }) {
 
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     let entry = hits.get(ip);
-    if (!entry || entry.resetAt <= now) { entry = { count: 0, resetAt: now + HOUR }; hits.set(ip, entry); }
+    if (!entry || entry.resetAt <= now) { entry = { count: 0, resetAt: now + windowMs }; hits.set(ip, entry); }
 
     res.setHeader('RateLimit-Limit', String(perHour));
     res.setHeader('RateLimit-Remaining', String(Math.max(0, perHour - entry.count - 1)));
@@ -50,9 +53,9 @@ export function rateLimit({ name, perHour }) {
       const wait = entry.resetAt - now;
       res.setHeader('Retry-After', String(Math.ceil(wait / 1000)));
       console.warn(`[rate-limit] ${name}: ${ip} hit ${perHour}/hour`);
-      return res.status(429).json({ error: `Too many requests. You can try again in ${minutesText(wait)}.` });
+      return res.status(429).json({ error: `${message || 'Too many requests.'} You can try again in ${minutesText(wait)}.` });
     }
-    if (daily.count >= dailyLimit) {
+    if (countsTowardDaily && daily.count >= dailyLimit) {
       const wait = daily.resetAt - now;
       res.setHeader('Retry-After', String(Math.ceil(wait / 1000)));
       console.warn(`[rate-limit] daily total of ${dailyLimit} reached`);
@@ -60,7 +63,7 @@ export function rateLimit({ name, perHour }) {
     }
 
     entry.count += 1;
-    daily.count += 1;
+    if (countsTowardDaily) daily.count += 1;
     next();
   };
 }

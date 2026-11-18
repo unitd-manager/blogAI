@@ -7,13 +7,16 @@ export async function startApp(env = {}) {
   // any route that reaches the database answers 503 instead.
   process.env.MYSQL_HOST = '127.0.0.1';
   process.env.MYSQL_PORT = '1';
+  // Login off unless a test turns it on (so a password in your .env doesn't change these tests).
+  process.env.APP_PASSWORD = '';
   Object.assign(process.env, env);
   const { app } = await import('../server/index.js');
   const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
 
-  async function call(method, path, body, { raw } = {}) {
+  async function call(method, path, body, { raw, cookie } = {}) {
     const init = { method, headers: {} };
+    if (cookie) init.headers.Cookie = cookie;
     if (body !== undefined) {
       init.headers['Content-Type'] = 'application/json';
       init.body = raw ? body : JSON.stringify(body);

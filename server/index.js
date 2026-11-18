@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import 'dotenv/config';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +7,7 @@ import { generateArticle } from './workflow.js';
 import { researchWebsite, researchChosenTopic } from './research.js';
 import { getAiMode, isAiEnabled, requestContext } from './ai.js';
 import { rateLimit, limits } from './rateLimit.js';
+import { loginEnabled, passwordMatches, isLoggedIn, setSessionCookie, clearSessionCookie, requireLogin } from './auth.js';
 
 // Abort signal that fires if the browser disconnects before we answer (tab closed, client timeout, proxy cut-off).
 function disconnectSignal(res) {
@@ -20,7 +20,9 @@ export const app = express();
 // Behind a reverse proxy (nginx etc.) on the same machine, read the visitor's real IP from X-Forwarded-For
 // so rate limits apply per visitor, not to the proxy. Set TRUST_PROXY in .env for other setups.
 app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
-app.use(cors()); app.use(express.json({ limit: '1mb' }));
+// No cors(): the page and the API share one origin, so other websites get no access to the API.
+app.use(express.json({ limit: '1mb' }));
+app.use(requireLogin);
 const parseStoredJson = (value, fallback) => { try { return value ? JSON.parse(value) : fallback; } catch { return fallback; } };
 
 // ---- Input validation helpers ----
@@ -69,6 +71,18 @@ function publicError(error, fallback) {
   // Our own research/workflow errors are written for users; strip anything that looks like an account/org id.
   return message.replace(/org_[A-Za-z0-9]+/g, '[account]').slice(0, 300) || fallback;
 }
+// ---- Team login (APP_PASSWORD in .env) ----
+app.get('/api/session', (req, res) => res.json({ loginRequired: loginEnabled(), loggedIn: isLoggedIn(req) }));
+app.post('/api/login', rateLimit({ name: 'login', perHour: 10, windowMs: 15 * 60 * 1000, countsTowardDaily: false, message: 'Too many login attempts.' }), (req, res) => {
+  if (!loginEnabled()) return res.json({ ok: true });
+  if (!passwordMatches(req.body?.password)) {
+    console.warn('[login] wrong password from', req.ip);
+    return res.status(401).json({ error: 'Wrong password. Please try again.' });
+  }
+  setSessionCookie(req, res);
+  res.json({ ok: true });
+});
+app.post('/api/logout', (req, res) => { clearSessionCookie(req, res); res.json({ ok: true }); });
 app.get('/api/health', async (_req, res) => {
   const mode = getAiMode(); let localAiAvailable = false;
   if (mode === 'ollama') { try { const local = await fetch((process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434/v1').replace(/\/v1\/?$/, '/api/tags'), { signal: AbortSignal.timeout(1200) }); localAiAvailable = local.ok; } catch { localAiAvailable = false; } }
@@ -245,5 +259,6 @@ app.use((err, _req, res, _next) => {
 });
 // Start listening only when run as the server (tests import `app` without starting it).
 const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.NODE_TEST_CONTEXT);
+if (!isTest && !loginEnabled()) console.warn('[login] APP_PASSWORD is not set: anyone who can open this site can use it. Set APP_PASSWORD in .env before deploying.');
 const port = Number(process.env.PORT || 4000); if (!isTest) initializeDatabase().then(() => app.listen(port, () => console.log(`SignalWrite API listening on ${port}`))).catch(e => { console.error('MySQL connection failed:', e.message); app.listen(port, () => console.log(`SignalWrite API listening on ${port} (database unavailable)`)); });
 
