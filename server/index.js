@@ -43,7 +43,11 @@ const optionalObject = (value, name, maxJsonChars) => {
   return value;
 };
 // People usually type "buffer.com" without https:// — add it for them.
-const normalizeWebsiteUrl = (raw) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`);
+const normalizeWebsiteUrl = (raw) => {
+  const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
+  try { new URL(url); } catch { throw new BadRequest('That does not look like a website address. Try something like example.com.'); }
+  return url;
+};
 
 // Turn internal/provider errors into messages that are safe and useful to show in the browser.
 // Full details stay in the server log.
@@ -135,8 +139,8 @@ app.post('/api/articles', async (req, res) => {
     let insertId = null;
     try {
       const [saved] = await pool.query(
-        'INSERT INTO articles (project_id,title,topic,keyword,related_keywords_json,keyword_strategy_json,meta_data_json,content,sources_json,evidence_review_json,word_count,seo_score) VALUES (?,?,?,?,?,?,?,?,?,?,?,0)',
-        [projectId, topic, topic, keyword, JSON.stringify(keywordIdeas), strategyData, metaDataStr, content, sourceData, reviewData, content.split(/\s+/).filter(Boolean).length]
+        'INSERT INTO articles (project_id,website,title,topic,keyword,related_keywords_json,keyword_strategy_json,meta_data_json,content,sources_json,evidence_review_json,word_count,seo_score) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)',
+        [projectId, context || null, topic, topic, keyword, JSON.stringify(keywordIdeas), strategyData, metaDataStr, content, sourceData, reviewData, content.split(/\s+/).filter(Boolean).length]
       );
       insertId = saved.insertId;
     } catch (dbErr) {
@@ -144,6 +148,7 @@ app.post('/api/articles', async (req, res) => {
     }
     res.status(201).json({
       id: insertId,
+      website: context || null,
       title: topic,
       keyword,
       relatedKeywords: keywordIdeas,

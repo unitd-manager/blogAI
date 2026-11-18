@@ -20,6 +20,7 @@ export async function initializeDatabase() {
   if (!names.has('related_keywords_json')) await pool.query('ALTER TABLE articles ADD COLUMN related_keywords_json LONGTEXT NULL');
   if (!names.has('keyword_strategy_json')) await pool.query('ALTER TABLE articles ADD COLUMN keyword_strategy_json LONGTEXT NULL');
   if (!names.has('meta_data_json')) await pool.query('ALTER TABLE articles ADD COLUMN meta_data_json LONGTEXT NULL');
+  if (!names.has('website')) await pool.query('ALTER TABLE articles ADD COLUMN website VARCHAR(500) NULL');
   // Older databases were created as latin1, which rejects curly quotes, special dashes and emoji
   // that AI models write — the article then silently fails to save. Convert to utf8mb4 (lossless).
   await pool.query('ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');

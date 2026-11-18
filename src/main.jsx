@@ -238,7 +238,7 @@ function App() {
         setTab('My articles');
         notify(`Batch complete! Successfully drafted ${generated.length} of ${total} articles.`);
       } else {
-        setTab('Writer');
+        setTab('Blog writer');
         notify('SEO Draft & Keyword Value Strategy generated!');
       }
     } else {
@@ -311,7 +311,13 @@ status: "${article.status || 'Draft'}"
   }
 
   const hostname = (() => {
-    try { return new URL(url).hostname; } catch { return 'your website'; }
+    // Prefer the website this article was written for (saved with it), so old articles and
+    // reloaded pages still show the right site; fall back to what's typed in the analysis box.
+    for (const candidate of [article?.website, url]) {
+      if (!candidate) continue;
+      try { return new URL(/^[a-z]+:\/\//i.test(candidate) ? candidate : `https://${candidate}`).hostname; } catch { /* try next */ }
+    }
+    return 'your website';
   })();
 
   const primaryStrategy = article?.keywordStrategy || {
@@ -351,7 +357,7 @@ status: "${article.status || 'Draft'}"
             <div className="nav-group" key={label}>
               <div className="nav-label">{label}</div>
               {items.map(([name, icon]) => (
-                <button key={name} onClick={() => setTab(name)} className={'nav-item ' + (tab === name ? 'active' : '')}>
+                <button key={name} onClick={() => setTab(name)} className={'nav-item ' + (tab === name ? 'active' : '')} aria-label={name} title={name}>
                   <Icon name={icon} size={17}/>
                   <span>{name}</span>
                   {name === 'My articles' && articles.length > 0 && <em>{articles.length}</em>}
@@ -518,7 +524,7 @@ status: "${article.status || 'Draft'}"
                   {articles.length ? (
                     <div className="article-mini-list">
                       {articles.slice(0, 3).map((a) => (
-                        <button className="article-mini" key={a.id} onClick={() => { setArticle(a); setTab('Writer'); }}>
+                        <button className="article-mini" key={a.id} onClick={() => { setArticle(a); setTab('Blog writer'); }}>
                           <span className="mini-file"><Icon name="file" size={15}/></span>
                           <span><b>{a.title}</b><small>{a.keyword || 'Primary keyword'} · {a.word_count || 0} words</small></span>
                           <Icon name="chev" size={14}/>
@@ -887,7 +893,7 @@ status: "${article.status || 'Draft'}"
             </>
           )}
 
-          {tab === 'Writer' && (
+          {tab === 'Blog writer' && (
             <>
               <div className="inner-head writer-header">
                 <div>
@@ -1314,7 +1320,7 @@ status: "${article.status || 'Draft'}"
               <div className="article-list-panel panel">
                 {articles.length ? (
                   articles.map((a, i) => (
-                    <button className="article-row" key={a.id || i} onClick={() => { setArticle(a); setTab('Writer'); }}>
+                    <button className="article-row" key={a.id || i} onClick={() => { setArticle(a); setTab('Blog writer'); }}>
                       <span className="row-icon"><Icon name="file" size={17}/></span>
                       <span className="row-title">
                         <b>{a.title}</b>
