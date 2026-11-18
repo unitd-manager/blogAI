@@ -39,7 +39,11 @@ const Icon = ({ name, size = 18 }) => {
 
 
 function markdownToHtml(md = '') {
-  return String(md)
+  // Escape raw HTML first so text copied from websites/AI can never inject <script> into a CMS,
+  // and only allow http(s), mailto and relative links.
+  const escaped = String(md).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return escaped
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, text, href) => (/^(https?:|mailto:|\/|#)/i.test(href) ? `[${text}](${href})` : text))
     .replace(/^### (.*$)/gim, '<h3>$1</h3>')
     .replace(/^## (.*$)/gim, '<h2>$1</h2>')
     .replace(/^# (.*$)/gim, '<h1>$1</h1>')
@@ -136,7 +140,11 @@ function App() {
   const seo = article ? keywordAudit(article.content, article.title, article.keyword, article.relatedKeywords || []) : null;
 
   async function analyze() {
+    // Block double-clicks: React's busy flag updates a render later, so guard synchronously.
+    if (analyze.running) return;
     if (!url.trim()) { setAnalysisError('Add your website URL first.'); return; }
+    analyze.running = true;
+    setTimeout(() => { analyze.running = false; }, 1500);
     setAnalysisError('');
     setBusy(true);
     try {
