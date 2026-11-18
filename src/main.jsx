@@ -292,7 +292,7 @@ status: "${article.status || 'Draft'}"
   }
 
   const hostname = (() => {
-    try { return new URL(url).hostname; } catch { return 'clientwebsite.com'; }
+    try { return new URL(url).hostname; } catch { return 'your website'; }
   })();
 
   const primaryStrategy = article?.keywordStrategy || {
@@ -390,7 +390,7 @@ status: "${article.status || 'Draft'}"
                   <h2>Show the Value Behind<br/><i>Every Keyword You Target.</i></h2>
                   <p>Don't just write blogs. Demonstrate search intent, funnel stage, and ranking rationale to clients so they see the real ROI.</p>
                   <button className="hero-button" onClick={() => setTab('Website analysis')}>
-                    Analyze client website <Icon name="arrow" size={15}/>
+                    Analyze website <Icon name="arrow" size={15}/>
                   </button>
                   <div className="hero-proof">
                     <span className="proof-avatars"><b>N</b><b>✦</b><b>W</b></span>
@@ -470,7 +470,7 @@ status: "${article.status || 'Draft'}"
                   <div className="steps">
                     <div className="step">
                       <div className="step-number done"><Icon name="globe" size={17}/></div>
-                      <div className="step-copy"><b>Analyze client website</b><span>Extract products, headings & audience</span></div>
+                      <div className="step-copy"><b>Analyze website</b><span>Extract products, headings & audience</span></div>
                       <span className="step-state">{analyzed ? 'DONE' : 'START'}</span>
                     </div>
                     <div className="step">
@@ -527,23 +527,23 @@ status: "${article.status || 'Draft'}"
           {tab === 'Website analysis' && (
             <>
               <div className="inner-head">
-                <div className="eyebrow">STEP 01 · CLIENT DISCOVERY</div>
-                <h1>Start with your client website.</h1>
+                <div className="eyebrow">STEP 01 · WEBSITE DISCOVERY</div>
+                <h1>Start with a website.</h1>
                 <p>We'll analyze products, headings, and audience language to uncover high-impact keyword opportunities.</p>
               </div>
               <div className="analysis-layout">
                 <div className="panel analysis-form">
-                  <label htmlFor="siteurl">Client website URL</label>
+                  <label htmlFor="siteurl">Website URL</label>
                   <div className="url-field">
                     <Icon name="link" size={17}/>
-                    <input id="siteurl" placeholder="https://clientwebsite.com" value={url} onChange={(e) => setUrl(e.target.value)}/>
+                    <input id="siteurl" placeholder="https://example.com" value={url} onChange={(e) => setUrl(e.target.value)}/>
                   </div>
                   <span className="field-help">We'll review public pages to map their search opportunities and brand context.</span>
                   <label className="second-label">Existing blog content <span>OPTIONAL</span></label>
                   <textarea placeholder="Paste links to existing posts, or tell us what topics the client already covers…" rows="4" value={existingBlogs} onChange={(e) => setExistingBlogs(e.target.value)}/>
                   <button className="primary wide" onClick={analyze} disabled={busy}>
                     {busy ? <span className="spinner"/> : <Icon name="spark" size={16}/>}
-                    {busy ? 'Analyzing client website & search intent…' : 'Analyze client website'}
+                    {busy ? 'Analyzing website & search intent…' : 'Analyze website'}
                   </button>
                   {analysisError && <div className="analysis-error" role="alert">{analysisError}</div>}
                   <div className="privacy-note">🔒 Public pages only. Secure and privacy preserving.</div>
@@ -594,7 +594,7 @@ status: "${article.status || 'Draft'}"
               )}
               {!analyzed && (
                 <div className="notice">
-                  <Icon name="spark" size={16}/> No website scanned yet. <button onClick={() => setTab('Website analysis')}>Analyze client website</button> to generate topics.
+                  <Icon name="spark" size={16}/> No website scanned yet. <button onClick={() => setTab('Website analysis')}>Analyze a website</button> to generate topics.
                 </div>
               )}
 
