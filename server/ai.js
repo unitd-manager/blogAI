@@ -1,4 +1,5 @@
 import { ChatOpenAI } from '@langchain/openai';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 export function getAiMode() {
   return process.env.AI_MODE || (process.env.OPENAI_API_KEY ? 'openai' : 'free');
@@ -50,26 +51,40 @@ export function createChatModel({ temperature = 0.4, timeout } = {}) {
   throw new Error(`Unsupported AI mode: ${mode}`);
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Per-request context. The API routes run their work inside requestContext.run({ signal }),
+// where the signal aborts when the browser disconnects (closed tab, timeout, proxy cut-off).
+// Every AI call picks it up automatically, so the server stops spending tokens on work nobody
+// will receive — and a retry in the browser doesn't create a duplicate article.
+export const requestContext = new AsyncLocalStorage();
+
+const abortError = () => Object.assign(new Error('The request was cancelled.'), { name: 'AbortError' });
+const sleep = (ms, signal) => new Promise((resolve, reject) => {
+  if (signal?.aborted) return reject(abortError());
+  const timer = setTimeout(resolve, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(timer); reject(abortError()); }, { once: true });
+});
 
 // Free-tier providers (e.g. Groq: 8k tokens/minute) reject bursts with HTTP 429 and say
 // "try again in Xs". Wait that long and retry (within a time budget) instead of failing.
 // Applied here so every caller — website analysis and article writing — gets it.
 function withRateLimitRetry(model, budgetMs = 150_000) {
   const invoke = model.invoke.bind(model);
-  model.invoke = async (...args) => {
+  model.invoke = async (input, options = {}) => {
+    const signal = options.signal || requestContext.getStore()?.signal;
     const deadline = Date.now() + budgetMs;
     for (;;) {
+      if (signal?.aborted) throw abortError();
       try {
-        return await invoke(...args);
+        return await invoke(input, signal ? { ...options, signal } : options);
       } catch (error) {
+        if (signal?.aborted) throw abortError();
         const message = String(error?.message || '');
         const isRateLimit = error?.status === 429 || /\b429\b|rate limit/i.test(message);
         const hinted = Number(message.match(/try again in ([\d.]+)s/i)?.[1]);
         const wait = Math.min(Number.isFinite(hinted) ? hinted * 1000 + 1000 : 15_000, 60_000);
         if (!isRateLimit || Date.now() + wait > deadline) throw error;
         console.warn(`[ai] Rate limited; retrying in ${Math.round(wait / 1000)}s`);
-        await sleep(wait);
+        await sleep(wait, signal);
       }
     }
   };

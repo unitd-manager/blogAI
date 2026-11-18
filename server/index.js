@@ -6,7 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { pool, initializeDatabase } from './db.js';
 import { generateArticle } from './workflow.js';
 import { researchWebsite, researchChosenTopic } from './research.js';
-import { getAiMode, isAiEnabled } from './ai.js';
+import { getAiMode, isAiEnabled, requestContext } from './ai.js';
+
+// Abort signal that fires if the browser disconnects before we answer (tab closed, client timeout, proxy cut-off).
+function disconnectSignal(res) {
+  const controller = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) controller.abort(); });
+  return controller.signal;
+}
 
 const app = express(); app.use(cors()); app.use(express.json({ limit: '1mb' }));
 const parseStoredJson = (value, fallback) => { try { return value ? JSON.parse(value) : fallback; } catch { return fallback; } };
@@ -84,7 +91,8 @@ app.post('/api/analyze', async (req, res) => {
       extraContext: optionalString(body.extraContext, 'Extra context', 5_000) || ''
     };
   } catch (e) { return res.status(400).json({ error: publicError(e, 'Invalid request.') }); }
-  try { res.json(await researchWebsite(input)); }
+  const signal = disconnectSignal(res);
+  try { res.json(await requestContext.run({ signal }, () => researchWebsite(input))); }
   catch (e) {
     console.warn('[analyze] failed:', e?.message, e?.cause?.code || '');
     res.status(400).json({ error: publicError(e, 'Unable to analyze that website. Please try again.') });
@@ -110,9 +118,15 @@ app.post('/api/articles', async (req, res) => {
     if (context) context = normalizeWebsiteUrl(context);
     sources = optionalArray(body.sources, 'Sources', 40).filter((s) => s && typeof s === 'object' && typeof s.url === 'string');
   } catch (e) { return res.status(400).json({ error: publicError(e, 'Invalid request.') }); }
+  const signal = disconnectSignal(res);
   try {
-    const research = await researchChosenTopic({ topic, keyword, websiteUrl: context, siteSources: sources });
-    const result = await generateArticle({ topic, keyword, relatedKeywords: keywordIdeas, keywordStrategy, internalLinks, context, sources: research.sources });
+    const { research, result } = await requestContext.run({ signal }, async () => {
+      const research = await researchChosenTopic({ topic, keyword, websiteUrl: context, siteSources: sources });
+      const result = await generateArticle({ topic, keyword, relatedKeywords: keywordIdeas, keywordStrategy, internalLinks, context, sources: research.sources });
+      return { research, result };
+    });
+    // Browser already gave up: don't save a copy it will never see (its retry would create a duplicate).
+    if (signal.aborted) return;
     const content = String(result.content);
     const sourceData = JSON.stringify(result.sources || []);
     const reviewData = JSON.stringify(result.evidenceReview || null);

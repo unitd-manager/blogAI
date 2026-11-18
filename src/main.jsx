@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 import { keywordAudit } from '../shared/seoAudit.js';
@@ -43,13 +43,13 @@ function markdownToHtml(md = '') {
   // and only allow http(s), mailto and relative links.
   const escaped = String(md).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   return escaped
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, text, href) => (/^(https?:|mailto:|\/|#)/i.test(href) ? `[${text}](${href})` : text))
     .replace(/^### (.*$)/gim, '<h3>$1</h3>')
     .replace(/^## (.*$)/gim, '<h2>$1</h2>')
     .replace(/^# (.*$)/gim, '<h1>$1</h1>')
     .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
     .replace(/\*(.*)\*/gim, '<em>$1</em>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/gim, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    // Filter and convert links in ONE pass (spaces trimmed), so nothing slips past the allow-list.
+    .replace(/\[([^\]]+)\]\(\s*([^)]*?)\s*\)/g, (m, text, href) => (/^(https?:\/\/|mailto:|\/(?!\/)|#)\S*$/i.test(href) ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>` : text))
     .replace(/\n\n+/g, '</p><p>')
     .replace(/\n/g, '<br/>')
     .replace(/^(.+)$/, '<p>$1</p>');
@@ -104,7 +104,7 @@ function generateFaqJsonLd(art) {
       acceptedAnswer: { '@type': 'Answer', text: item.a }
     }))
   };
-  return { qaList, scriptTag: `<script type="application/ld+json">\n${JSON.stringify(jsonLd, null, 2)}\n</script>` };
+  return { qaList, scriptTag: `<script type="application/ld+json">\n${JSON.stringify(jsonLd, null, 2).replace(/</g, '\\u003c')}\n</script>` };
 }
 
 function App() {
@@ -120,6 +120,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [article, setArticle] = useState(null);
   const [articles, setArticles] = useState([]);
+  const inFlight = useRef(false); // true while an analysis or batch draft request is running
   const [query, setQuery] = useState('');
   const [toast, setToast] = useState('');
   const [setup, setSetup] = useState(false);
@@ -141,10 +142,9 @@ function App() {
 
   async function analyze() {
     // Block double-clicks: React's busy flag updates a render later, so guard synchronously.
-    if (analyze.running) return;
+    if (inFlight.current) return;
     if (!url.trim()) { setAnalysisError('Add your website URL first.'); return; }
-    analyze.running = true;
-    setTimeout(() => { analyze.running = false; }, 1500);
+    inFlight.current = true;
     setAnalysisError('');
     setBusy(true);
     try {
@@ -165,12 +165,15 @@ function App() {
       setAnalysisError(message);
       notify('Website analysis needs attention');
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
 
   async function writeBatch(indicesToDraft) {
     if (!indicesToDraft || !indicesToDraft.length) return;
+    if (inFlight.current) return; // a second click must not draft the same topics twice
+    inFlight.current = true;
     setBusy(true);
     setWritingError('');
     const total = indicesToDraft.length;
@@ -183,6 +186,7 @@ function App() {
     });
 
     const generated = [];
+    let lastError = '';
 
     for (let i = 0; i < indicesToDraft.length; i++) {
       const topic = topics[indicesToDraft[i]];
@@ -212,16 +216,18 @@ function App() {
         try { data = raw ? JSON.parse(raw) : {}; } catch {}
         if (!r.ok) throw Error(data.error || `HTTP ${r.status}`);
         generated.push(data);
-        setArticles((prev) => [data, ...prev.filter((x) => x.id !== data.id)]);
+        setArticles((prev) => [data, ...(data.id == null ? prev : prev.filter((x) => x.id !== data.id))]);
         setBatchProgress((prev) => ({
           ...prev,
           completed: [...prev.completed, data]
         }));
       } catch (e) {
         console.error('Error drafting topic:', topic.title, e);
+        lastError = e.name === 'TimeoutError' ? 'Drafting timed out.' : (e.message || '');
       }
     }
 
+    inFlight.current = false;
     setBusy(false);
     setBatchProgress((prev) => ({ ...prev, active: false }));
     setSelected([]);
@@ -236,7 +242,7 @@ function App() {
         notify('SEO Draft & Keyword Value Strategy generated!');
       }
     } else {
-      setWritingError('Draft generation failed. Please try again.');
+      setWritingError(lastError ? `Draft generation failed: ${lastError}` : 'Draft generation failed. Please try again.');
       notify('Draft generation encountered an issue');
     }
   }
@@ -248,21 +254,26 @@ function App() {
 
   async function save() {
     if (!article) return;
+    // Keep the in-session list in step with the editor either way.
+    setArticles((prev) => prev.map((a) => (a === article || (article.id != null && a.id === article.id) ? article : a)));
+    if (article.id == null) { notify('Not saved to the database (this draft has no saved copy). Copy or download it to keep it.'); return; }
     try {
-      if (article.id) {
-        await fetch(`/api/articles/${article.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: article.title,
-            content: article.content,
-            metaData: article.metaData
-          })
-        });
+      const r = await fetch(`/api/articles/${article.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: article.title,
+          content: article.content,
+          metaData: article.metaData
+        })
+      });
+      if (!r.ok) {
+        let data = {}; try { data = await r.json(); } catch {}
+        throw new Error(data.error || `HTTP ${r.status}`);
       }
       notify('Draft & SEO Meta settings saved');
-    } catch {
-      notify('Saved in this session');
+    } catch (e) {
+      notify(`Not saved: ${e.message || 'server unavailable'}. Your edits are still here, try again.`);
     }
   }
 
@@ -331,7 +342,7 @@ status: "${article.status || 'Draft'}"
           <span className="brand-beta">BETA</span>
         </div>
         <div className="workspace">
-          <div className="workspace-avatar">N</div>
+          <div className="workspace-avatar">M</div>
           <div><b>My workspace</b><small>Client Agency Studio</small></div>
           <span className="dots">···</span>
         </div>
@@ -357,8 +368,8 @@ status: "${article.status || 'Draft'}"
             <button onClick={() => setTab('Website analysis')}>Start website scan <Icon name="arrow" size={13}/></button>
           </div>
           <div className="user-row">
-            <div className="user-avatar">N</div>
-            <div className="user-info"><b>Nabeela</b><span>nabeela@agency.com</span></div>
+            <div className="user-avatar">M</div>
+            <div className="user-info"><b>My Account</b><span>SignalWrite workspace</span></div>
             <span className="dots">···</span>
           </div>
         </div>
@@ -374,7 +385,7 @@ status: "${article.status || 'Draft'}"
           <div className="top-right">
             <span className="status-dot"/> All changes saved
             <button className="icon-button"><Icon name="clock" size={16}/></button>
-            <button className="avatar-small">N</button>
+            <button className="avatar-small" title="My Account">M</button>
           </div>
         </header>
 
