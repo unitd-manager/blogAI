@@ -205,3 +205,43 @@
 .logout-button{margin-left:auto;border:1px solid #ecebf1;background:#fff;color:#7b7a8d;border-radius:6px;padding:5px 8px;font-size:10px;font-weight:600}
 .logout-button:hover{color:#9a3434;border-color:#eccaca;background:#fdf1f1}
 @media(max-width:760px){.login-card .brand>span:not(.brand-mark){display:inline}}
+/* Sign up / log in */
+.auth-tabs{display:grid;grid-template-columns:1fr 1fr;background:#f4f3f9;border-radius:8px;padding:3px;margin-bottom:20px}
+.auth-tabs button{border:0;background:transparent;border-radius:6px;padding:8px;font-size:11px;font-weight:600;color:#7b7a8d}
+.auth-tabs button.active{background:#fff;color:#4c3fb3;box-shadow:0 1px 4px #24233a14}
+.login-card label{margin-top:12px}
+.login-card .optional{font-weight:400;color:#a3a1af;margin-left:4px}
+.link-button{border:0;background:none;padding:0;color:#6852cb;font-weight:600;font-size:inherit;text-decoration:underline}
+/* Trial / subscription banner */
+.account-banner{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:9px 42px;background:#f3f0ff;border-bottom:1px solid #e7e2ff;color:#4c3fb3;font-size:11px}
+.account-banner .banner-muted{color:#7d74b8}
+.account-banner.warn{background:#fff8ea;border-color:#f6e6c8;color:#8a6420}
+.account-banner.warn .banner-muted{color:#a48a5a}
+.account-banner.ended{background:#fdf1f1;border-color:#f3d6d6;color:#8f3535}
+/* Admin page */
+.admin-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+.admin-stats .panel{padding:13px 14px;display:flex;flex-direction:column;gap:3px}
+.admin-stats b{font:700 20px Manrope;color:#35344c}
+.admin-stats span{font-size:9px;color:#9391a2;letter-spacing:.3px}
+.admin-panel{padding:14px}
+.admin-toolbar{display:flex;justify-content:space-between;gap:10px;margin-bottom:12px}
+.admin-empty{font-size:11px;color:#9593a3;text-align:center;padding:24px 0;margin:0}
+.table-scroll{overflow-x:auto}
+.admin-table{width:100%;border-collapse:collapse;font-size:10px;color:#4b4a5f}
+.admin-table th{text-align:left;font-size:9px;letter-spacing:.5px;color:#9391a2;font-weight:700;padding:8px;border-bottom:1px solid #eeedf3;white-space:nowrap}
+.admin-table td{padding:10px 8px;border-bottom:1px solid #f3f2f7;vertical-align:middle;white-space:nowrap}
+.admin-table td b{display:block;font-size:11px}
+.admin-table td small{color:#9391a2}
+.status-pill{display:inline-block;padding:3px 8px;border-radius:10px;font-size:9px;font-weight:600;background:#f4f3f9;color:#6d6b80}
+.status-pill.trial{background:#f0edff;color:#5a47c7}
+.status-pill.active{background:#e9f7f0;color:#3d8a63}
+.status-pill.expired{background:#fff5e9;color:#a86f2c}
+.status-pill.disabled{background:#fdf1f1;color:#9a3434}
+.status-pill.admin{background:#eaf3ff;color:#3d6fae}
+.admin-actions{display:flex;gap:5px}
+.admin-actions button{border:1px solid #e8e7ee;background:#fff;border-radius:6px;padding:5px 8px;font-size:9px;font-weight:600;color:#5e5c71}
+.admin-actions button:hover:not(:disabled){border-color:#8b7be0;color:#4c3fb3}
+.admin-actions button:disabled{opacity:.45;cursor:not-allowed}
+.user-info span{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:760px){.account-banner{padding:9px 16px}.admin-stats{grid-template-columns:repeat(2,1fr)}.admin-toolbar .search-box{width:auto;flex:1}}
+@media(max-width:760px){.user-row .logout-button{display:none}}
