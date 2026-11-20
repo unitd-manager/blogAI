@@ -1,0 +1,126 @@
+# Auto-deploy SignalWrite: every push to main is tested, built, and deployed to the server.
+#
+#   push to main ─► test (npm test on a throw-away MySQL) ─► build ─► copy to server ─► restart ─► health check
+#                                         │ fails: nothing is deployed               fails: previous version restored
+#
+# Server details come from GitHub repo Settings → Secrets and variables → Actions (see DEPLOY.md).
+# Until DEPLOY_HOST is set, pushes are only tested and the deploy step is skipped.
+
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # "Run workflow" button for a manual deploy
+
+# Never run two deploys at the same time; a newer push waits for the running one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-root-password"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: '3306'
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ci-root-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run tests (no AI calls, test databases only)
+        run: npm test
+      - name: Build the web app
+        run: npm run build
+      - name: Package the release
+        # Only what the server needs. .env, node_modules and tests are never included.
+        run: tar czf release.tgz server shared dist package.json package-lock.json scripts/remote-deploy.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release.tgz
+          retention-days: 7
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_APP_NAME: ${{ secrets.DEPLOY_APP_NAME }}
+      DEPLOY_RESTART_COMMAND: ${{ secrets.DEPLOY_RESTART_COMMAND }}
+    steps:
+      - name: Check deploy settings
+        id: config
+        run: |
+          missing=""
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          [ -n "${{ secrets.DEPLOY_SSH_KEY }}" ] || missing="$missing DEPLOY_SSH_KEY"
+          if [ -n "$missing" ]; then
+            echo "::notice title=Deploy skipped::Tests passed, but these secrets are not set yet:$missing (see DEPLOY.md)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        if: steps.config.outputs.ready == 'true'
+        with:
+          name: release
+
+      - name: Set up SSH
+        if: steps.config.outputs.ready == 'true'
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            # First-time convenience. For stronger security set DEPLOY_KNOWN_HOSTS (see DEPLOY.md).
+            ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload and deploy
+        if: steps.config.outputs.ready == 'true'
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -p ${DEPLOY_PORT:-22} -o BatchMode=yes -o ConnectTimeout=20"
+          TARGET="$DEPLOY_USER@$DEPLOY_HOST"
+          REMOTE_TGZ="/tmp/signalwrite-release-${GITHUB_SHA}.tgz"
+          $SSH "$TARGET" "cat > '$REMOTE_TGZ'" < release.tgz
+          # Values go over base64 so quotes or spaces in them can't break the remote command.
+          b64() { printf '%s' "$1" | base64 -w0; }
+          ENVS="APP_DIR_B64=$(b64 "$DEPLOY_PATH") APP_NAME_B64=$(b64 "${DEPLOY_APP_NAME:-signalwrite}") RESTART_B64=$(b64 "$DEPLOY_RESTART_COMMAND") RELEASE_TGZ=$REMOTE_TGZ COMMIT=${GITHUB_SHA::7}"
+          # Run the deploy script from inside the release, so the newest version of the script is used.
+          $SSH "$TARGET" "tmp=\$(mktemp -d) && tar xzf '$REMOTE_TGZ' -C \"\$tmp\" scripts/remote-deploy.sh && \
+            { $ENVS bash \"\$tmp/scripts/remote-deploy.sh\"; rc=\$?; }; rm -rf \"\$tmp\" '$REMOTE_TGZ'; exit \${rc:-1}"
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
