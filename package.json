@@ -12,10 +12,9 @@
     "test": "node --test --test-reporter=spec \"tests/*.test.js\""
   },
   "dependencies": {
-    "@langchain/core": "^0.3.58",
-    "@langchain/langgraph": "^0.2.74",
-    "@langchain/openai": "^0.6.3",
-    "cors": "^2.8.5",
+    "@langchain/core": "^1.4.2",
+    "@langchain/langgraph": "^1.7.5",
+    "@langchain/openai": "^1.8.4",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "mysql2": "^3.14.1",

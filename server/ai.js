@@ -29,7 +29,7 @@ export function createChatModel({ temperature = 0.4, timeout } = {}) {
     const customBase = process.env.OPENAI_BASE_URL;
     const config = {
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      openAIApiKey: process.env.OPENAI_API_KEY,
+      apiKey: process.env.OPENAI_API_KEY,
       temperature,
       maxRetries: 1,
       timeout: timeout || 60_000
