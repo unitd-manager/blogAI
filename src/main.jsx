@@ -107,205 +107,6 @@ function generateFaqJsonLd(art) {
   return { qaList, scriptTag: `<script type="application/ld+json">\n${JSON.stringify(jsonLd, null, 2).replace(/</g, '\\u003c')}\n</script>` };
 }
 
-async function postJson(url, body) {
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  let data = {}; try { data = await r.json(); } catch {}
-  if (!r.ok) throw new Error(data.error || `Request failed (HTTP ${r.status}).`);
-  return data;
-}
-
-function AuthScreen({ onLoggedIn, trialDays = 14 }) {
-  const [mode, setMode] = useState('signup'); // 'signup' | 'login'
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const isSignup = mode === 'signup';
-
-  async function submit(e) {
-    e.preventDefault();
-    if (busy) return;
-    if (!email.trim() || !password) { setError('Enter your email and password.'); return; }
-    if (isSignup && password.length < 8) { setError('Password must be at least 8 characters.'); return; }
-    setBusy(true); setError('');
-    try {
-      const user = await postJson(isSignup ? '/api/signup' : '/api/login', isSignup ? { name, email, password } : { email, password });
-      onLoggedIn(user);
-    } catch (err) {
-      setError(err.message || 'Could not reach the server. Try again.');
-      setPassword('');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const switchMode = (next) => { setMode(next); setError(''); setPassword(''); };
-
-  return (
-    <div className="login-page">
-      <form className="login-card" onSubmit={submit} noValidate>
-        <div className="brand">
-          <span className="brand-mark"><Icon name="spark" size={19}/></span>
-          <span>signal<span className="brand-light">write</span></span>
-        </div>
-        <div className="auth-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={isSignup} className={isSignup ? 'active' : ''} onClick={() => switchMode('signup')}>Start free trial</button>
-          <button type="button" role="tab" aria-selected={!isSignup} className={!isSignup ? 'active' : ''} onClick={() => switchMode('login')}>Log in</button>
-        </div>
-        <h1>{isSignup ? `Try SignalWrite free for ${trialDays} days` : 'Welcome back'}</h1>
-        <p>{isSignup ? 'No card needed. Analyze websites and write SEO articles from day one.' : 'Log in to your SignalWrite account.'}</p>
-        {isSignup && (
-          <>
-            <label htmlFor="auth-name">Your name <span className="optional">optional</span></label>
-            <input id="auth-name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={120}/>
-          </>
-        )}
-        <label htmlFor="auth-email">Email</label>
-        <input id="auth-email" type="email" autoComplete="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} maxLength={191}/>
-        <label htmlFor="auth-password">Password {isSignup && <span className="optional">at least 8 characters</span>}</label>
-        <input
-          id="auth-password" type="password" autoComplete={isSignup ? 'new-password' : 'current-password'}
-          value={password} onChange={(e) => setPassword(e.target.value)} maxLength={200}
-          aria-invalid={Boolean(error)} aria-describedby={error ? 'login-error' : undefined}
-        />
-        {error && <div className="login-error" id="login-error" role="alert">{error}</div>}
-        <button className="primary wide" type="submit" disabled={busy}>
-          {busy ? 'Please wait…' : isSignup ? 'Start my free trial' : 'Log in'}
-        </button>
-        <small>
-          {isSignup
-            ? <>Already have an account? <button type="button" className="link-button" onClick={() => switchMode('login')}>Log in</button></>
-            : <>New here? <button type="button" className="link-button" onClick={() => switchMode('signup')}>Start a free trial</button> · Forgot your password? Ask your admin to reset it.</>}
-        </small>
-      </form>
-    </div>
-  );
-}
-
-// Banner at the top of every page: trial days left, or the "trial ended" notice.
-function AccountBanner({ me }) {
-  if (!me || me.status === 'admin') return null;
-  const contact = me.plan?.contact;
-  if (me.status === 'trial') {
-    return (
-      <div className={'account-banner ' + (me.trialDaysLeft <= 3 ? 'warn' : '')}>
-        <Icon name="clock" size={14}/>
-        <span><b>Free trial:</b> {me.trialDaysLeft} {me.trialDaysLeft === 1 ? 'day' : 'days'} left.</span>
-        <span className="banner-muted">After that it's {me.plan?.price}{contact ? <> · contact {contact} to subscribe</> : null}.</span>
-      </div>
-    );
-  }
-  if (me.status === 'expired' || me.status === 'disabled') {
-    return (
-      <div className="account-banner ended" role="status">
-        <Icon name="clock" size={14}/>
-        <span>
-          <b>{me.status === 'disabled' ? 'This account is disabled.' : 'Your free trial has ended.'}</b>{' '}
-          You can still view, copy and download your articles. To write new ones, subscribe for {me.plan?.price}
-          {contact ? <> · contact <b>{contact}</b></> : ' · contact us'}.
-        </span>
-      </div>
-    );
-  }
-  return null;
-}
-
-const STATUS_LABEL = { admin: 'Admin · free access', trial: 'Free trial', active: 'Subscribed', expired: 'Trial ended', disabled: 'Disabled' };
-
-function AdminPanel({ me, notify }) {
-  const [users, setUsers] = useState(null);
-  const [error, setError] = useState('');
-  const [busyId, setBusyId] = useState(null);
-  const [filter, setFilter] = useState('');
-
-  const load = () => fetch('/api/admin/users')
-    .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not load users'); return d; })
-    .then((d) => { setUsers(d); setError(''); })
-    .catch((e) => setError(e.message));
-  useEffect(() => { load(); }, []);
-
-  async function act(user, action, label) {
-    let days;
-    if (action === 'activate' || action === 'extend_trial') {
-      const answer = window.prompt(`${label} for ${user.email}: how many days?`, action === 'activate' ? '30' : '7');
-      if (answer === null) return;
-      days = Number(answer);
-      if (!Number.isInteger(days) || days < 1 || days > 3660) { notify('Enter a whole number of days (1–3660).'); return; }
-    } else if (!window.confirm(`${label} for ${user.email}?`)) return;
-    setBusyId(user.id);
-    try {
-      const data = await postJson(`/api/admin/users/${user.id}`, { action, ...(days ? { days } : {}) });
-      setUsers((list) => list.map((u) => (u.id === user.id ? { ...u, ...data.user } : u)));
-      if (data.tempPassword) window.prompt(`New temporary password for ${user.email}. Copy it now and send it to them; it won't be shown again:`, data.tempPassword);
-      else notify(`${label}: done for ${user.email}`);
-    } catch (e) {
-      notify(e.message);
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  const fmt = (d) => (d ? new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
-  const shown = (users || []).filter((u) => !filter || u.email.includes(filter.toLowerCase()) || (u.name || '').toLowerCase().includes(filter.toLowerCase()));
-  const counts = (users || []).reduce((acc, u) => ({ ...acc, [u.status]: (acc[u.status] || 0) + 1 }), {});
-
-  return (
-    <>
-      <div className="inner-head">
-        <div className="eyebrow">ADMIN · CUSTOMERS</div>
-        <h1>Customers & subscriptions.</h1>
-        <p>Trials start automatically at sign-up. After a customer pays you, activate their subscription here.</p>
-      </div>
-      <div className="admin-stats">
-        {['trial', 'active', 'expired', 'disabled', 'admin'].map((k) => (
-          <div className="panel" key={k}><b>{counts[k] || 0}</b><span>{STATUS_LABEL[k]}</span></div>
-        ))}
-      </div>
-      <div className="panel admin-panel">
-        <div className="admin-toolbar">
-          <div className="search-box"><Icon name="search" size={13}/><input placeholder="Search email or name…" value={filter} onChange={(e) => setFilter(e.target.value)}/></div>
-          <button className="outline-button" onClick={load}>Refresh</button>
-        </div>
-        {error && <div className="login-error">{error}</div>}
-        {!users && !error && <p className="admin-empty">Loading…</p>}
-        {users && shown.length === 0 && <p className="admin-empty">No customers yet.</p>}
-        {shown.length > 0 && (
-          <div className="table-scroll">
-            <table className="admin-table">
-              <thead><tr><th>Customer</th><th>Status</th><th>Trial ends</th><th>Paid until</th><th>Articles</th><th>Actions</th></tr></thead>
-              <tbody>
-                {shown.map((u) => (
-                  <tr key={u.id}>
-                    <td><b>{u.name || '—'}</b><small>{u.email}</small></td>
-                    <td><span className={'status-pill ' + u.status}>{STATUS_LABEL[u.status]}</span></td>
-                    <td>{fmt(u.trialEndsAt)}</td>
-                    <td>{fmt(u.subscriptionUntil)}</td>
-                    <td>{u.articleCount}</td>
-                    <td className="admin-actions">
-                      {u.status !== 'admin' && (
-                        <>
-                          <button disabled={busyId === u.id} onClick={() => act(u, 'activate', 'Activate subscription')}>Activate</button>
-                          <button disabled={busyId === u.id} onClick={() => act(u, 'extend_trial', 'Extend trial')}>+ Trial</button>
-                          {u.subscriptionUntil && <button disabled={busyId === u.id} onClick={() => act(u, 'deactivate', 'End subscription')}>End sub</button>}
-                          {u.disabled
-                            ? <button disabled={busyId === u.id} onClick={() => act(u, 'enable', 'Enable account')}>Enable</button>
-                            : <button disabled={busyId === u.id || u.id === me.id} onClick={() => act(u, 'disable', 'Disable account')}>Disable</button>}
-                        </>
-                      )}
-                      {u.id !== me.id && <button disabled={busyId === u.id} onClick={() => act(u, 'reset_password', 'Reset password')}>Reset password</button>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
 function App() {
   const [tab, setTab] = useState('Overview');
   const [url, setUrl] = useState('');
@@ -331,48 +132,20 @@ function App() {
   const [batchProgress, setBatchProgress] = useState({ active: false, current: 0, total: 0, currentTopic: '', completed: [] });
   const [topicViewMode, setTopicViewMode] = useState('list'); // 'list' | 'calendar'
   const [settings, setSettings] = useState({ brandVoice: '', audience: '' });
-  // Logged-in account (null = not logged in). Checked once on load; a 401 from any API call
-  // sends the user back to the login screen, a 402 (trial ended) refreshes the account status.
-  const [me, setMe] = useState(undefined);
-  const readOnly = Boolean(me && !me.canWrite);
   const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
-    const originalFetch = window.fetch;
-    window.fetch = async (...args) => {
-      const res = await originalFetch(...args);
-      const target = String(args[0]?.url || args[0] || '');
-      if (res.status === 401 && target.startsWith('/api/') && target !== '/api/login') setMe(null);
-      if (res.status === 402) originalFetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((u) => u && setMe(u)).catch(() => {});
-      return res;
-    };
-    originalFetch('/api/me').then(async (r) => setMe(r.ok ? await r.json() : null)).catch(() => setMe(null));
-    return () => { window.fetch = originalFetch; };
-  }, []);
-
-  async function logout() {
-    if (!window.confirm('Log out of SignalWrite on this browser?')) return;
-    try { await fetch('/api/logout', { method: 'POST' }); } catch {}
-    setArticle(null); setArticles([]); setTopics([]); setAnalyzed(false);
-    setTab('Overview');
-    setMe(null);
-  }
-
-  useEffect(() => {
-    if (!me) return;
     fetch('/api/articles').then((r) => (r.ok ? r.json() : [])).then((x) => Array.isArray(x) && setArticles(x)).catch(() => {});
     fetch('/api/settings').then((r) => (r.ok ? r.json() : null)).then((x) => x && setSettings({ brandVoice: x.brandVoice || '', audience: x.audience || '' })).catch(() => {});
     fetch('/api/health').then((r) => r.json()).then((x) => setSetup(!(x.aiReady ?? x.aiConfigured))).catch(() => setSetup(true));
-  }, [me?.id]);
+  }, []);
 
-  const notify = (m) => { setToast(m); setTimeout(() => setToast(''), m.length > 80 ? 6000 : 2800); };
-  const TRIAL_ENDED_MSG = `Your free trial has ended. Subscribe for ${me?.plan?.price || 'a monthly plan'} to write again${me?.plan?.contact ? ` (contact ${me.plan.contact})` : ''}. Your articles stay available to view and download.`;
+  const notify = (m) => { setToast(m); setTimeout(() => setToast(''), 2800); };
   const seo = article ? keywordAudit(article.content, article.title, article.keyword, article.relatedKeywords || []) : null;
 
   async function analyze() {
     // Block double-clicks: React's busy flag updates a render later, so guard synchronously.
     if (inFlight.current) return;
-    if (readOnly) { notify(TRIAL_ENDED_MSG); return; }
     if (!url.trim()) { setAnalysisError('Add your website URL first.'); return; }
     inFlight.current = true;
     setAnalysisError('');
@@ -402,7 +175,6 @@ function App() {
 
   async function writeBatch(indicesToDraft) {
     if (!indicesToDraft || !indicesToDraft.length) return;
-    if (readOnly) { notify(TRIAL_ENDED_MSG); return; }
     if (inFlight.current) return; // a second click must not draft the same topics twice
     inFlight.current = true;
     setBusy(true);
@@ -485,7 +257,6 @@ function App() {
 
   async function save() {
     if (!article) return;
-    if (readOnly) { notify(TRIAL_ENDED_MSG); return; }
     // Keep the in-session list in step with the editor either way.
     setArticles((prev) => prev.map((a) => (a === article || (article.id != null && a.id === article.id) ? article : a)));
     if (article.id == null) { notify('Not saved to the database (this draft has no saved copy). Copy or download it to keep it.'); return; }
@@ -511,7 +282,6 @@ function App() {
   }
 
   async function saveSettings() {
-    if (readOnly) { notify(TRIAL_ENDED_MSG); return; }
     setSavingSettings(true);
     try {
       const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) });
@@ -606,12 +376,8 @@ status: "${article.status || 'Draft'}"
 
   const menu = [
     ['WORKSPACE', [['Overview', 'grid'], ['Website analysis', 'globe'], ['Topic ideas', 'trend'], ['Blog writer', 'edit'], ['My articles', 'file']]],
-    ['PREFERENCES', [['Settings', 'settings'], ...(me?.isAdmin ? [['Admin', 'target']] : [])]]
+    ['PREFERENCES', [['Settings', 'settings']]]
   ];
-
-  if (me === undefined) return <div className="login-page" aria-busy="true"/>;
-  if (me === null) return <AuthScreen onLoggedIn={(user) => { setTab('Overview'); setMe(user); }}/>;
-  const initial = (me.name || me.email || 'M').trim().charAt(0).toUpperCase();
 
   return (
     <div className="app">
@@ -622,8 +388,8 @@ status: "${article.status || 'Draft'}"
           <span className="brand-beta">BETA</span>
         </div>
         <div className="workspace">
-          <div className="workspace-avatar">{initial}</div>
-          <div><b>My workspace</b><small>{STATUS_LABEL[me.status]}</small></div>
+          <div className="workspace-avatar">M</div>
+          <div><b>My workspace</b><small>Client Agency Studio</small></div>
           <span className="dots">···</span>
         </div>
         <div className="nav-wrap">
@@ -648,9 +414,9 @@ status: "${article.status || 'Draft'}"
             <button onClick={() => setTab('Website analysis')}>Start website scan <Icon name="arrow" size={13}/></button>
           </div>
           <div className="user-row">
-            <div className="user-avatar">{initial}</div>
-            <div className="user-info"><b>{me.name || 'My Account'}</b><span title={me.email}>{me.email}</span></div>
-            <button className="logout-button" onClick={logout} title="Log out">Log out</button>
+            <div className="user-avatar">M</div>
+            <div className="user-info"><b>My Account</b><span>SignalWrite workspace</span></div>
+            <span className="dots">···</span>
           </div>
         </div>
       </aside>
@@ -665,11 +431,10 @@ status: "${article.status || 'Draft'}"
           <div className="top-right">
             <span className="status-dot"/> All changes saved
             <button className="icon-button"><Icon name="clock" size={16}/></button>
-            <button className="avatar-small" title={`${me.email} · click to log out`} onClick={logout}>{initial}</button>
+            <button className="avatar-small" title="My Account">M</button>
           </div>
         </header>
 
-        <AccountBanner me={me}/>
         <div className="page">
           {tab === 'Overview' && (
             <>
@@ -1636,20 +1401,16 @@ status: "${article.status || 'Draft'}"
             </>
           )}
 
-          {tab === 'Admin' && me.isAdmin && <AdminPanel me={me} notify={notify}/>}
-
           {tab === 'Settings' && (
             <>
               <div className="inner-head">
-                <div className="eyebrow">COMMERCIAL BLUEPRINT & PRICING</div>
-                <h1>Agency settings & client sales pitch.</h1>
-                <p>Everything you need to package, pitch, and sell this tool to paying clients.</p>
+                <div className="eyebrow">PREFERENCES</div>
+                <h1>Writing settings.</h1>
+                <p>Set the brand voice and audience once. Every new article follows them.</p>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1.05fr .95fr', gap: '16px' }}>
-                <div className="panel settings-panel" style={{ maxWidth: 'none' }}>
-                  <h3 style={{ font: '700 13px Manrope', margin: '0 0 12px', color: '#2b2940' }}>Agency Configuration</h3>
-                  <label>Agency Workspace</label>
-                  <input value="SignalWrite Agency Suite" readOnly/>
+              <div>
+                <div className="panel settings-panel">
+                  <h3 style={{ font: '700 13px Manrope', margin: '0 0 12px', color: '#2b2940' }}>Writing style</h3>
                   <label>Default Brand Voice</label>
                   <textarea placeholder="e.g. Authoritative, conversion-focused, direct, actionable, backed by real data." rows="3"
                     value={settings.brandVoice} maxLength={500}
@@ -1660,41 +1421,6 @@ status: "${article.status || 'Draft'}"
                     onChange={(e) => setSettings({ ...settings, audience: e.target.value })}/>
                   <small className="field-help" style={{ margin: '-10px 0 14px' }}>Used in every new article this team writes.</small>
                   <button className="primary" onClick={saveSettings} disabled={savingSettings}>{savingSettings ? 'Saving…' : 'Save preferences'}</button>
-                </div>
-
-                <div className="panel">
-                  <h3 style={{ font: '700 13px Manrope', margin: '0 0 4px', color: '#2b2940' }}>How to Price & Sell This to Clients</h3>
-                  <p style={{ fontSize: '9px', color: '#7a778e', margin: '0 0 12px' }}>Use this proven monetization structure to close client retainers:</p>
-
-                  <div className="roi-metric-grid" style={{ marginBottom: '14px' }}>
-                    <div className="roi-metric-box">
-                      <b>$250–$500</b>
-                      <span>Per Article Charge</span>
-                    </div>
-                    <div className="roi-metric-box">
-                      <b>$999/mo</b>
-                      <span>Monthly Retainer (4x)</span>
-                    </div>
-                    <div className="roi-metric-box">
-                      <b>85%</b>
-                      <span>Agency Margin</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gap: '8px', fontSize: '9px', color: '#4a485e', lineHeight: 1.55 }}>
-                    <div style={{ background: '#fcfbfe', border: '1px solid #ebe7f7', borderRadius: '7px', padding: '9px 12px' }}>
-                      <b>💼 Why Clients Buy: Guaranteed Lead CTA</b>
-                      <p style={{ margin: '2px 0 0', color: '#7e7b91', fontSize: '8px' }}>"Every blog includes a custom next-step CTA driving readers to book a call or buy your services."</p>
-                    </div>
-                    <div style={{ background: '#fcfbfe', border: '1px solid #ebe7f7', borderRadius: '7px', padding: '9px 12px' }}>
-                      <b>📊 Why Clients Buy: Transparent Keyword ROI</b>
-                      <p style={{ margin: '2px 0 0', color: '#7e7b91', fontSize: '8px' }}>"You receive a 1-click strategy deliverable report showing search intent, funnel stage, and Google SERP previews."</p>
-                    </div>
-                    <div style={{ background: '#fcfbfe', border: '1px solid #ebe7f7', borderRadius: '7px', padding: '9px 12px' }}>
-                      <b>⚡ Why Clients Buy: 10x Faster Content Engine</b>
-                      <p style={{ margin: '2px 0 0', color: '#7e7b91', fontSize: '8px' }}>"Turn website insights into 10 published, fact-checked, lead-generating articles in an afternoon."</p>
-                    </div>
-                  </div>
                 </div>
               </div>
             </>

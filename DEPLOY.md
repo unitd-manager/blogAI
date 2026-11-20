@@ -35,7 +35,6 @@ from the same port, so no separate frontend upload is needed any more.
    (copy `.env.example`). Deploys never change or overwrite `.env`.
    Important settings in `.env` on the server:
    - `PORT` (the health check uses it), MySQL settings, `OPENAI_API_KEY`, `TAVILY_API_KEY`
-   - `ADMIN_EMAILS` (your team: free access + Admin page), `PLAN_PRICE`, `SUBSCRIBE_CONTACT`
    - `TRUST_PROXY=1` if the app is behind a cloud load balancer (nginx on the same server: leave it out)
 6. If nginx/Apache is in front: proxy the domain to `http://127.0.0.1:<PORT>`.
 
